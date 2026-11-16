@@ -20,6 +20,18 @@
 ### System Requirements:
 - macOS 13.0 and Later  
 
+> **This is a fork** of [lihaoyun6/Topit](https://github.com/lihaoyun6/Topit) (AGPL-3.0),
+> bundle id `com.tobiashochgurtel.TopitFork`, app name *Topit Fork*. It adds:
+> - **Native pin mode** — keeps the real window on top via Accessibility instead of mirroring it
+>   with ScreenCaptureKit (no Screen Recording permission, fully interactive, brief flicker when
+>   switching apps). *Mirror* mode remains the default and is unchanged.
+> - **Hover pin button** — a small pin button on the window under the cursor.
+>
+> Details, limitations and the underlying macOS research:
+> [docs/native-pin-mode.md](docs/native-pin-mode.md),
+> [docs/research/](docs/research/README.md),
+> [docs/fork.md](docs/fork.md).
+
 ### Installation:
 Download the latest installation file [here](../../releases/latest) or install via Homebrew:  
 
@@ -36,6 +48,9 @@ brew install lihaoyun6/tap/topit
 ## Q&A
 **1. Why does Topit need screen recording and accessibility permissions?**
 > Topit uses the accessibility permissions and screen recording permissions to control and capture your windows.  
+>
+> **In this fork:** only *Mirror* mode needs Screen Recording. *Native* mode and the hover pin
+> button are Accessibility-only — see [docs/native-pin-mode.md](docs/native-pin-mode.md).
 
 **2. Does Topit consume a lot of power?**
 > Topit uses ScreenCapture Kit to capture windows with a lower CPU overhead. But it may still drain the battery faster when you pin too many windows. 
