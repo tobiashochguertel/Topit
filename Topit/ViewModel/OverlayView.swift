@@ -84,6 +84,8 @@ struct OverlayView: View {
                             },
                             onWindowClose: {
                                 SCManager.pinnedWdinwows.removeAll(where: { $0 === window })
+                                // Fork: keep the unified pin registry in step with the panel closing.
+                                PinRegistry.shared.unregister(windowID: window.windowID)
                                 if let w = nsWindow, am.activedFrame == w.frame {
                                     am.activedFrame = .zero
                                 }

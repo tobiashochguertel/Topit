@@ -62,9 +62,11 @@ final class PinRegistry: ObservableObject {
     /// Published so SwiftUI (status menu, future pin list UI) can observe it.
     @Published private(set) var entries: [PinEntry] = []
 
-    /// Mirror pins are removed by their overlay panel closing, which happens a moment after
-    /// registration. Without a grace period a prune running in between would drop a healthy pin.
-    private static let mirrorRegistrationGrace: TimeInterval = 3
+    /// Safety net for mirror pins: `OverlayView` unregisters its pin when the panel closes, so this
+    /// only covers the window between `createNewWindow` and the panel being visible in
+    /// `NSApp.windows`. Kept short — a long grace would make the hover button and hotkeys report a
+    /// window as pinned for seconds after the user closed its overlay.
+    private static let mirrorRegistrationGrace: TimeInterval = 0.3
 
     private init() {}
 

@@ -215,13 +215,9 @@ final class NativePinManager: ObservableObject {
             return
         }
 
-        let now = Date()
-        let backoff = min(Self.raiseInterval * pow(2, Double(min(state.failures, 4))), Self.maxBackoff)
-        // Occlusion (a window above us that actually overlaps us), not "nothing above me": otherwise
-        // Topit's own overlays or unrelated windows elsewhere on screen would trigger endless raises.
-        guard force || isWindowOccluded(windowID: windowID),
-              force || now.timeIntervalSince(state.lastAttempt) >= backoff else { return }
-
+        // Resolve the Accessibility element first: whether we can even reach the window must not
+        // depend on whether it happens to be covered right now, otherwise pins whose window is
+        // never exposed in AX would never be cleaned up.
         if let cached = state.axWindow, !isValid(cached) { state.axWindow = nil }
         if state.axWindow == nil { state.axWindow = getAXWindow(windowID: windowID) }
         guard let axWindow = state.axWindow else {
@@ -234,6 +230,16 @@ final class NativePinManager: ObservableObject {
         }
         state.lookupFailures = 0
 
+        let now = Date()
+        let backoff = min(Self.raiseInterval * pow(2, Double(min(state.failures, 4))), Self.maxBackoff)
+        // Occlusion (a window above us that actually overlaps us), not "nothing above me": otherwise
+        // Topit's own overlays or unrelated windows elsewhere on screen would trigger endless raises.
+        guard force || isWindowOccluded(windowID: windowID),
+              force || now.timeIntervalSince(state.lastAttempt) >= backoff else {
+            pins[windowID] = state
+            return
+        }
+        
         state.lastAttempt = now
         // `kAXRaiseAction` normally reorders without activating the owner, but some apps do come
         // forward. Hand focus straight back, otherwise keystrokes would be delivered to the
@@ -249,11 +255,11 @@ final class NativePinManager: ObservableObject {
         if result != .success {
             state.failures += 1
         } else if isWindowOccluded(windowID: windowID) {
-            state.failures = 0
-        } else {
-            // The raise was accepted but the window is still below another one — typically while
-            // a different app owns the screen. Back off instead of hammering WindowServer.
+            // The raise was accepted but the window is still covered — typically while a different
+            // app owns the screen. Back off instead of hammering WindowServer every 150 ms.
             state.failures += 1
+        } else {
+            state.failures = 0
         }
         pins[windowID] = state
     }

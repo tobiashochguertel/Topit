@@ -66,6 +66,8 @@ struct OverlayViewOpacity: View {
                                     activateWindow(axWindow: axWindow, frame: CGRectTransform(cgRect: window.frame))
                                 }
                                 SCManager.pinnedWdinwows.removeAll(where: { $0 === window })
+                                // Fork: keep the unified pin registry in step with the panel closing.
+                                PinRegistry.shared.unregister(windowID: window.windowID)
                                 timer?.invalidate()
                                 nsWindow = nil
                                 stopCapture()

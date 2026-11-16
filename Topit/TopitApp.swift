@@ -98,7 +98,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if showOnDock { _ = applicationShouldHandleReopen(NSApp, hasVisibleWindows: false) }
+        // Fork: the Selector panel captures every window for its thumbnails, so opening it at launch
+        // would trigger the Screen Recording prompt even for someone who only uses native mode.
+        // In native mode Topit starts as a menu-bar app + hover button; the Selector is still one
+        // dock/menu-bar click away (and still legitimately needs Screen Recording when used).
+        if showOnDock, PinActions.currentMode == .mirror {
+            _ = applicationShouldHandleReopen(NSApp, hasVisibleWindows: false)
+        }
         // Fork: hover pin button. Started unconditionally; the `showHoverPinButton` setting is
         // honoured inside the poll so toggling it needs no restart.
         HoverPinController.shared.start()

@@ -119,6 +119,10 @@ final class HoverPinController: ObservableObject {
 
         let mouse = NSEvent.mouseLocation
 
+        // Refresh before the self-hover shortcut below returns: the pinned state changes as a
+        // result of clicking the button, and the cursor is on the button at exactly that moment.
+        refreshPinnedState()
+
         // Self-hover: keep the button alive while the cursor is on the button itself, otherwise
         // moving towards it would hide it before the click lands.
         if let panel, panel.isVisible, panel.frame.insetBy(dx: -8, dy: -8).contains(mouse) {

@@ -162,13 +162,22 @@ class SCManager {
         return result
     }
     
+    /// Fork: upstream retried `getExcludingDesktopWindows` once a second for ever when the user had
+    /// declined Screen Recording. After three declined attempts we stop, so a native-mode user who
+    /// declined once is not kept in a permanent prompt/capture-retry loop.
+    static private var declinedRetries = 0
+    static private let maxDeclinedRetries = 3
+    
     static func updateAvailableContent(completion: @escaping (SCShareableContent?) -> Void) {
         SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { [self] content, error in
             if let error = error {
                 switch error {
                 case SCStreamError.userDeclined:
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-                        self.updateAvailableContent() {_ in}
+                    if declinedRetries < maxDeclinedRetries {
+                        declinedRetries += 1
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                            self.updateAvailableContent() {_ in}
+                        }
                     }
                 default:
                     print("Error: failed to fetch available content: ".local, error.localizedDescription)
@@ -176,6 +185,7 @@ class SCManager {
                 completion(nil) // 在错误情况下返回 nil
                 return
             }
+            declinedRetries = 0
 
             availableContent = content
             if let displays = content?.displays, !displays.isEmpty {

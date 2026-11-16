@@ -58,6 +58,8 @@ struct OverlayView12: View {
                             },
                             onWindowClose: {
                                 SCManager.pinnedWdinwows.removeAll(where: { $0 === window })
+                                // Fork: keep the unified pin registry in step with the panel closing.
+                                PinRegistry.shared.unregister(windowID: window.windowID)
                                 timer?.invalidate()
                                 nsWindow = nil
                                 cm.stopCapture()
