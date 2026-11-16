@@ -98,7 +98,7 @@ class WindowHighlighter {
             return
         }
         
-        if let app = targetWindow["kCGWindowOwnerName"] as? String, app != "Topit",
+        if let app = targetWindow["kCGWindowOwnerName"] as? String, app != Bundle.main.appName,
            let windowID = targetWindow["kCGWindowNumber"] as? Int, targetWindowID != windowID {
             mask?.close()
             targetWindowID = windowID

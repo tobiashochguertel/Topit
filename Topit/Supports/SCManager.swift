@@ -145,7 +145,9 @@ class ScreenCaptureManager: NSObject, ObservableObject, SCStreamDelegate, SCStre
 class SCManager {
     static var pinnedWdinwows = [SCWindow]()
     static var availableContent: SCShareableContent?
-    static private let excludedApps = ["", "com.apple.dock", "com.apple.screencaptureui", "com.apple.controlcenter", "com.apple.notificationcenterui", "com.apple.systemuiserver", "com.apple.WindowManager", "dev.mnpn.Azayaka", "com.gaosun.eul", "com.pointum.hazeover", "net.matthewpalmer.Vanilla", "com.dwarvesv.minimalbar", "com.bjango.istatmenus.status", "com.macpaw.CleanMyMac4", "com.lihaoyun6.Topit"]
+    // Fork: exclude our own bundle explicitly instead of relying on the upstream bundle id
+    // (com.lihaoyun6.Topit) — this app now identifies as com.tobiashochgurtel.TopitFork.
+    static private var excludedApps = ["", "com.apple.dock", "com.apple.screencaptureui", "com.apple.controlcenter", "com.apple.notificationcenterui", "com.apple.systemuiserver", "com.apple.WindowManager", "dev.mnpn.Azayaka", "com.gaosun.eul", "com.pointum.hazeover", "net.matthewpalmer.Vanilla", "com.dwarvesv.minimalbar", "com.bjango.istatmenus.status", "com.macpaw.CleanMyMac4", "com.lihaoyun6.Topit", Bundle.main.bundleIdentifier ?? ""]
     
     static func updateAvailableContentSync() -> SCShareableContent? {
         let semaphore = DispatchSemaphore(value: 0)

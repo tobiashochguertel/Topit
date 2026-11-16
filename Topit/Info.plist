@@ -6,9 +6,16 @@
 	<true/>
 	<key>OSAScriptingDefinition</key>
 	<string>Scriptable</string>
-	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/lihaoyun6/Topit/main/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>dP6zY7RAyK3DtV/dDrQ2V2dB0BY36jADwMKHZIX89u4=</string>
+	<!--
+		Fork note (com.tobiashochgurtel.TopitFork):
+
+		Upstream ships `SUFeedURL` + `SUPublicEDKey` pointing at lihaoyun6's appcast. Keeping them
+		would let Sparkle "update" this fork back into stock Topit, so both keys are removed here
+		and the updater is started inert (see Supports/Sparkle.swift).
+
+		To publish updates yourself: generate a Sparkle key pair (`Sparkle/bin/generate_keys`),
+		add `SUPublicEDKey` and `SUFeedURL` (raw.githubusercontent.com/<you>/Topit/main/appcast.xml)
+		below. The updater picks the feed up automatically on next launch. See docs/fork.md.
+	-->
 </dict>
 </plist>

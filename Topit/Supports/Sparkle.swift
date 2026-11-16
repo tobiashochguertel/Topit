@@ -8,7 +8,15 @@
 import SwiftUI
 import Sparkle
 
-let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+/// True when the fork ships its own update feed (see Topit/Info.plist).
+/// Upstream's appcast is signed with upstream's Sparkle key, so the fork removes `SUFeedURL`
+/// and never starts the updater. Sparkle stays compiled in; enabling it only requires adding
+/// `SUFeedURL` + `SUPublicEDKey` back — no code change needed.
+private var hasConfiguredFeed: Bool {
+    Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil
+}
+
+let updaterController = SPUStandardUpdaterController(startingUpdater: hasConfiguredFeed, updaterDelegate: nil, userDriverDelegate: nil)
 
 // This view model class publishes when new updates can be checked by the user
 final class CheckForUpdatesViewModel: ObservableObject {
