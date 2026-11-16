@@ -34,6 +34,13 @@ enum PinActions {
     }
 
     static func pin(windowID: CGWindowID) {
+        // Re-pinning a window with a *different* mode has to release the old pin first — otherwise
+        // e.g. the native keep-on-top loop would keep raising a window whose registry entry has
+        // already been replaced by a mirror pin (reachable from the window selector, which calls
+        // `pin` directly rather than `toggle`).
+        if let existingMode = PinRegistry.shared.mode(for: windowID), existingMode != currentMode {
+            unpin(windowID: windowID, mode: existingMode)
+        }
         switch currentMode {
         case .mirror:
             closeMainWindow()

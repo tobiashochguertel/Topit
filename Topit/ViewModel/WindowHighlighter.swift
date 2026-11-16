@@ -49,6 +49,9 @@ class WindowHighlighter {
     static let shared = WindowHighlighter()
     var mouseMonitor: Any?
     var mouseMonitorL: Any?
+    /// Fork: true while the click-to-select overlay is up. The hover pin button and the selection
+    /// mask would otherwise both float over the same window.
+    var isSelecting: Bool { mouseMonitor != nil || mouseMonitorL != nil }
     var targetWindowID: Int?
     var mask: EscPanel?
     

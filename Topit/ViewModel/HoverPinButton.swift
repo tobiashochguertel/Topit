@@ -112,7 +112,7 @@ final class HoverPinController: ObservableObject {
     // MARK: - Poll
 
     private func tick() {
-        guard enabled else {
+        guard enabled, !WindowHighlighter.shared.isSelecting else {
             if targetWindowID != nil { hideButton() }
             return
         }

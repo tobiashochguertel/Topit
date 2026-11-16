@@ -30,9 +30,8 @@ class pnpMouse: NSScriptCommand {
 
 class unpinAllWindows: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
-        DispatchQueue.main.async {
-            for layer in NSApp.windows.filter({$0.title.hasPrefix("Topit Layer")}) { layer.close() }
-            AvoidManager.shared.activedFrame = .zero
-        }
+        // Fork: route through PinActions so AppleScript also unpins native pins — this used to
+        // duplicate AppDelegate.unPinAll's mirror-only implementation.
+        DispatchQueue.main.async { PinActions.unpinAll() }
     }
 }
