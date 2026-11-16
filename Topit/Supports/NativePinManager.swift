@@ -111,7 +111,7 @@ final class NativePinManager: ObservableObject {
 
     /// Called on app quit so native pins of that app disappear instead of being re-raised.
     func handleTermination(pid: pid_t) {
-        for (id, state) in pins where state.pid == pid { unpin(windowID: id) }
+        for id in Array(pins.keys) where pins[id]?.pid == pid { unpin(windowID: id) }
     }
 
     // MARK: - Observers
@@ -193,7 +193,9 @@ final class NativePinManager: ObservableObject {
         let selfIsFrontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
         guard !selfIsFrontmost else { return }
 
-        for windowID in pins.keys {
+        // Snapshot: `raise` can drop a pin (window destroyed, app quit) and mutating the dictionary
+        // while iterating its `keys` view is not safe.
+        for windowID in Array(pins.keys) {
             guard isOnscreen(windowID: windowID) else {
                 // Minimised, on another Space, or closed — nothing to raise. Pausing here also
                 // stops us from yanking the user to another Space by raising an off-screen window.
