@@ -97,10 +97,25 @@ struct WindowView: View {
     @AppStorage("autoAvoid") private var autoAvoid: Bool = true
     @AppStorage("showBorder") private var showBorder: Bool = false
     @AppStorage("maxFps") private var maxFps: Int = 65535
+    @AppStorage("showHoverPinButton") private var showHoverPinButton: Bool = true
+    // Fork: how a window is kept on top, see Supports/PinRegistry.swift.
+    @AppStorage("pinMode") private var pinMode: PinMode = .mirror
+    @AppStorage("nativePinGentleMode") private var nativePinGentleMode: Bool = false
     
     var body: some View {
         SForm(spacing: 10) {
             SGroupBox(label: "Windows") {
+                SPicker("Pin Mode", selection: $pinMode,
+                        tips: "Mirror captures the window and floats a copy of it — pixel-accurate, but it needs Screen Recording permission and cannot be interacted with directly.\nNative keeps the real window on top via Accessibility — fully interactive, no Screen Recording, but it may flicker when you switch apps.") {
+                    Text("Mirror (Capture)").tag(PinMode.mirror)
+                    Text("Native (Accessibility)").tag(PinMode.native)
+                }
+                if pinMode == .native {
+                    SDivider()
+                    SToggle("Gentle Mode", isOn: $nativePinGentleMode,
+                            tips: "Native pins are re-asserted on a timer by default. Gentle Mode only re-raises when you switch apps or Spaces — calmer, but the window can stay covered for a moment.")
+                }
+                SDivider()
                 SPicker("Activate Pinned Window on", selection: $mouseOverAction,
                         tips: "When you select \"Left Click\" as the way to activate a window, you need to activate the window before moving it.") {
                     Text("Cursor Hover").tag(true)
@@ -118,6 +133,9 @@ struct WindowView: View {
                     Text("Bottom Leading").tag(1)
                     Text("Bottom Trailing").tag(3)
                 }
+                SDivider()
+                SToggle("Show Pin Button on Hovered Window", isOn: $showHoverPinButton,
+                        tips: "Shows a small pin button on the window under the cursor, so a window can be pinned without a hotkey or the menu bar.")
                 SDivider()
                 SPicker("Maximum Refresh Rate", selection: $maxFps) {
                     Text("30 Hz").tag(30)

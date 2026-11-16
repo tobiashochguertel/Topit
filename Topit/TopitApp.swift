@@ -53,6 +53,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     static let shared = AppDelegate()
     @AppStorage("showOnDock") private var showOnDock: Bool = true
     @AppStorage("showMenubar") private var showMenubar: Bool = true
+    /// Fork: dynamic list of currently pinned windows (both modes), filled in `menuNeedsUpdate`.
+    private let pinsMenu = NSMenu()
     
     func applicationWillFinishLaunching(_ notification: Notification) {
         if #unavailable(macOS 14) { isMacOS13 = true }
@@ -65,6 +67,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "Pin a Window".local, action: #selector(selectWindowToPin), keyEquivalent: "p")
         menu.addItem(withTitle: "Unpin all Windows".local, action: #selector(unPinAll), keyEquivalent: "u")
+        // Fork: native-pinned windows are real windows and cannot carry Topit's overlay buttons,
+        // so the status menu is one of the few places where they can be unpinned.
+        pinsMenu.delegate = self
+        let pinsItem = NSMenuItem(title: "Pinned Windows".local, action: nil, keyEquivalent: "")
+        pinsItem.submenu = pinsMenu
+        menu.addItem(pinsItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Window Selector".local, action: #selector(openFromMenuBar), keyEquivalent: "s")
         menu.addItem(NSMenuItem.separator())
@@ -83,12 +91,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         tips("Topit uses the accessibility permissions\nand screen recording permissions\nto control and capture your windows.".local, id: "topit.how-to-use.note")
         tips("macOS will prevent any notifications from appearing while Topit is running\nIt's not a bug or Topit's fault!".local, id: "topit.no-notifications.note")
-        scPerm = SCManager.updateAvailableContentSync() != nil
+        // Fork: only mirror mode has a reason to touch ScreenCaptureKit at launch. Probing it
+        // unconditionally means every native-mode user is greeted by a Screen Recording prompt.
+        scPerm = PinActions.currentMode == .mirror ? (SCManager.updateAvailableContentSync() != nil) : false
         axPerm = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as NSDictionary)
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         if showOnDock { _ = applicationShouldHandleReopen(NSApp, hasVisibleWindows: false) }
+        // Fork: hover pin button. Started unconditionally; the `showHoverPinButton` setting is
+        // honoured inside the poll so toggling it needs no restart.
+        HoverPinController.shared.start()
     }
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
@@ -125,10 +138,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc func unPinAll() {
-        DispatchQueue.main.async {
-            for layer in NSApp.windows.filter({$0.title.hasPrefix("Topit Layer")}) { layer.close() }
-            AvoidManager.shared.activedFrame = .zero
-        }
+        DispatchQueue.main.async { PinActions.unpinAll() }
     }
     
     @objc func about() {
@@ -148,34 +158,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// Pin / unpin whatever window is currently under the cursor.
+///
+/// Fork change: this used to resolve the window to an `SCWindow` up front, which makes
+/// `SCShareableContent.getExcludingDesktopWindows` run and pops the Screen Recording prompt even
+/// when the pin is going to be a native one. The mode decides now, not the lookup.
 func pnpUnderMouseWindow() {
-    if let window = getWindowUnderMouse(), let windowID = window["kCGWindowNumber"] as? UInt32,
-       let scWindow = getSCWindowWithID(windowID, noFilter: true), let scDisplay = getSCDisplayWithMouse() {
-        if SCManager.pinnedWdinwows.contains(scWindow) {
-            for w in NSApp.windows.filter({
-                $0.title == "Topit Layer\(windowID)"
-                || $0.title == "Topit Layer\(windowID)O"
-            }) { w.close() }
-        } else {
-            closeMainWindow()
-            createNewWindow(display: scDisplay, window: scWindow)
-        }
-    }
+    guard let window = getWindowUnderMouse(),
+          let windowID = window["kCGWindowNumber"] as? UInt32 else { return }
+    PinActions.toggle(windowID: windowID)
 }
 
 func pnpFrontmostWindow() {
-    if let scWindow = getFrontmostWindow(), let scDisplay = getSCDisplayWithMouse() {
-        let windowID = scWindow.windowID
-        if SCManager.pinnedWdinwows.contains(scWindow) {
-            for w in NSApp.windows.filter({
-                $0.title == "Topit Layer\(windowID)"
-                || $0.title == "Topit Layer\(windowID)O"
-            }) { w.close() }
-        } else {
-            closeMainWindow()
-            createNewWindow(display: scDisplay, window: scWindow)
-        }
-    }
+    // `getFrontmostCGWindow()` (not `getFrontmostWindow()`) so the native path stays
+    // ScreenCaptureKit-free.
+    guard let window = getFrontmostCGWindow(),
+          let windowID = window["kCGWindowNumber"] as? UInt32 else { return }
+    PinActions.toggle(windowID: windowID)
 }
 
 func closeMainWindow() {
@@ -246,6 +245,49 @@ func findNSSplitVIew(view: NSView?) -> NSSplitView? {
         for subview in current.subviews { queue.append(subview) }
     }
     return nil
+}
+
+// MARK: - Pinned windows menu (fork addition)
+
+extension AppDelegate: NSMenuDelegate {
+    /// Rebuilt every time the submenu is about to be displayed, so it always reflects live state
+    /// (a mirror panel can be closed by the user, a native window can go away on its own).
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === pinsMenu else { return }
+        menu.removeAllItems()
+        PinRegistry.shared.prune()
+        let entries = PinRegistry.shared.entries.sorted { $0.pinnedAt < $1.pinnedAt }
+
+        guard !entries.isEmpty else {
+            let item = NSMenuItem(title: "No Pinned Windows".local, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            return
+        }
+
+        for entry in entries {
+            let name = [entry.appName, entry.title].filter { !$0.isEmpty }.joined(separator: " — ")
+            let item = NSMenuItem(title: "\(name) · \(entry.mode.displayName)",
+                                  action: #selector(unpinFromMenu(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            // `windowID` is a UInt32; `tag` is an Int, but only for backwards compatibility with
+            // tag-based lookups — `representedObject` carries the id without truncation risk.
+            item.representedObject = entry.id
+            menu.addItem(item)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+        let unpinAll = NSMenuItem(title: "Unpin All Pinned Windows".local, action: #selector(unPinAll), keyEquivalent: "")
+        unpinAll.target = self
+        menu.addItem(unpinAll)
+    }
+
+    @objc func unpinFromMenu(_ sender: NSMenuItem) {
+        guard let windowID = sender.representedObject as? CGWindowID,
+              let mode = PinRegistry.shared.mode(for: windowID) else { return }
+        PinActions.unpin(windowID: windowID, mode: mode)
+    }
 }
 
 extension NSMenuItem {

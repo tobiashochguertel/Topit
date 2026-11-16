@@ -78,6 +78,15 @@ func createNewWindow(display: SCDisplay, window: SCWindow, opacity: Double? = ni
     panel.isReleasedWhenClosed = false
     panel.makeKeyAndOrderFront(nil)
     
+    // Fork: mirror pins are recorded in the unified registry so every consumer (hotkeys, menu bar,
+    // hover pin button, unpinAll) sees them next to native pins. The overlay panel is created
+    // synchronously above, so the registry never has to guess when the mirror becomes available.
+    PinRegistry.shared.register(windowID: window.windowID,
+                                ownerPID: window.owningApplication?.processID ?? -1,
+                                mode: .mirror,
+                                appName: window.owningApplication?.applicationName,
+                                title: window.title)
+    
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
         panel.setFrame(CGRectTransform(cgRect: window.frame), display: true)
         if let id = window.owningApplication?.bundleIdentifier {
@@ -101,18 +110,26 @@ func getAllCGWindows() -> [[String: Any]]? {
     return windowList
 }
 
-func getFrontmostWindow() -> SCWindow? {
+/// Frontmost window of the frontmost application — as a `CGWindowList` dictionary.
+///
+/// Fork addition: the ScreenCaptureKit-free half of `getFrontmostWindow()`. Native pins must not
+/// touch ScreenCaptureKit at all (otherwise a native-only user gets a Screen Recording prompt),
+/// so the CG-level lookup is split out and only the mirror path converts it to an `SCWindow`.
+func getFrontmostCGWindow() -> [String: Any]? {
     guard let appID = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
-    guard var windowList = getAllCGWindows() else { return nil }
+    guard let windowList = getAllCGWindows() else { return nil }
     
-    windowList = windowList.filter({
+    return windowList.first(where: {
         guard let frame = getCGWindowFrame(window: $0) else { return false }
         return $0["kCGWindowOwnerPID"] as? pid_t == appID
         && $0["kCGWindowAlpha"] as? NSNumber != 0
         && $0["kCGWindowLayer"] as? NSNumber == 0
         && frame.width > 40 && frame.height > 40
     })
-    if let window = windowList.first {
+}
+
+func getFrontmostWindow() -> SCWindow? {
+    if let window = getFrontmostCGWindow() {
         return getSCWindowWithID(window["kCGWindowNumber"] as? UInt32, noFilter: true)
     }
     return nil
@@ -179,6 +196,31 @@ func isWindowOnTop(windowID: CGWindowID) -> Bool {
         return false
     }
     return windowList.isEmpty
+}
+
+/// Fork addition: is another window actually *covering* this one?
+///
+/// `isWindowOnTop` asks for the stricter "nothing at all above me", which is almost never true and
+/// is not what "keep it on top" needs: floating panels (including Topit's own overlays) and
+/// non-overlapping windows legitimately sit above a pinned window. What matters is whether a window
+/// that *intersects* our bounds is stacked above us — that is the occlusion test used by
+/// `turhe123/pin-window-on-top` (`isAnyPinOccluded`), see docs/research/ax-native-pin-techniques.md.
+func isWindowOccluded(windowID: CGWindowID) -> Bool {
+    guard let frame = getCGWindowFrameWithID(windowID) else { return false }
+    guard let above = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow], windowID) as? [[String: Any]] else { return false }
+    let ownPID = ProcessInfo.processInfo.processIdentifier
+    
+    for window in above {
+        // macOS 14+ can include the queried window itself at the head of the list.
+        if let wid = window["kCGWindowNumber"] as? CGWindowID, wid == windowID { continue }
+        guard let ownerPID = window["kCGWindowOwnerPID"] as? pid_t,
+              ownerPID != ownPID,
+              (window["kCGWindowLayer"] as? NSNumber) == 0,
+              (window["kCGWindowAlpha"] as? NSNumber) != 0,
+              let otherFrame = getCGWindowFrame(window: window) else { continue }
+        if otherFrame.intersects(frame) { return true }
+    }
+    return false
 }
 
 func getCGWindowFrame(window: [String: Any]) -> CGRect? {

@@ -27,11 +27,14 @@ struct HighlightMask: View {
             .onPressGesture {
                 if let mask = WindowHighlighter.shared.mask {
                     mask.order(.above, relativeTo: windowID)
-                    if let window = getSCWindowWithID(UInt32(windowID)),
-                       !SCManager.pinnedWdinwows.contains(window),
-                       let display = getSCDisplayWithMouse() {
+                    // Fork: pin through the mode-aware entry point and check the registry instead of
+                    // `SCManager.pinnedWdinwows`, which only ever knew about mirror pins. Resolving
+                    // the window through CGWindowList also means picking a window no longer needs
+                    // ScreenCaptureKit at all.
+                    let id = UInt32(windowID)
+                    if getCGWindowWithID(id) != nil, !PinRegistry.shared.isPinned(id) {
                         mask.close()
-                        createNewWindow(display: display, window: window)
+                        PinActions.pin(windowID: id)
                         WindowHighlighter.shared.stopMouseMonitor()
                         return
                     }

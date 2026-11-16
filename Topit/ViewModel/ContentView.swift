@@ -48,7 +48,7 @@ struct ContentView: View {
                         if let window = selected.first, let panel = panel {
                             _ = SCManager.updateAvailableContentSync()
                             if SCManager.getWindows().contains(window) {
-                                createNewWindow(display: display, window: window)
+                                PinActions.pin(windowID: window.windowID)
                                 panel.close()
                             } else {
                                 let alert = createAlert(level: .critical, title: "Error", message: "This window is not available!", button1: "OK")
