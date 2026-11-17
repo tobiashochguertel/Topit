@@ -41,8 +41,15 @@ final class NativePinManager: ObservableObject {
     static let raiseInterval: TimeInterval = 0.15
     /// Longest interval we ever wait after raises that did not visibly take effect.
     static let maxBackoff: TimeInterval = 2.0
-    /// How quickly the keep-on-top timer polls `isWindowOnTop`.
+    /// How quickly the keep-on-top timer polls.
     static let pollInterval: TimeInterval = 0.15
+    /// Exponent cap for the backoff. `raiseInterval * 2^4 = 2.4 s`, so `maxBackoff` is what binds.
+    private static let maxFailures = 4
+    /// Attempts to resolve a window in Accessibility before giving up (150 ms × 20 ≈ 3 s).
+    private static let maxLookupFailures = 20
+    /// A raise can drag its window's app forward; handing focus back has to be throttled harder than
+    /// the raise itself or it turns into focus ping-pong with the raise loop.
+    private static let focusHandbackInterval: TimeInterval = 1.0
 
     private struct PinState {
         let pid: pid_t
@@ -52,10 +59,12 @@ final class NativePinManager: ObservableObject {
         var lastAttempt: Date = .distantPast
         /// Consecutive raises that left the window below something else. Drives the backoff.
         var failures: Int = 0
-        /// Consecutive failures to even resolve the window in Accessibility. Kept separate from
-        /// `failures`: "could not raise it high enough" is normal and must not drop the pin,
-        /// "Accessibility never gave us this window" (no permission, or an app that does not
-        /// expose its windows) must not turn into an endless poll either.
+        /// When we last handed focus back after a raise that stole it.
+        var lastFocusHandback: Date = .distantPast
+        /// Consecutive failures to resolve the window in Accessibility at all. Kept separate from
+        /// `failures`: "could not raise it high enough" is normal and must not drop the pin, while
+        /// "Accessibility never gave us this window" (no permission, or an app that does not expose
+        /// its windows) must not turn into an endless poll either.
         var lookupFailures: Int = 0
     }
 
@@ -69,13 +78,10 @@ final class NativePinManager: ObservableObject {
 
     // MARK: - Public API
 
-    var windowIDs: [CGWindowID] { Array(pins.keys) }
-
-    func isPinned(_ windowID: CGWindowID) -> Bool { pins[windowID] != nil }
-
     /// Record a native pin and raise the window immediately.
-    /// - Returns: `false` when the window could not be resolved (no AX element) or when
-    ///   Accessibility permission is missing.
+    /// - Returns: `false` when the window could not be resolved in Accessibility (no permission yet,
+    ///   or an app that does not expose its windows). Such a pin is still registered and retries for
+    ///   ~3 s, so granting permission now is picked up without re-pinning.
     @discardableResult
     func pin(windowID: CGWindowID) -> Bool {
         guard let cgWindow = getCGWindowWithID(windowID),
@@ -195,14 +201,28 @@ final class NativePinManager: ObservableObject {
 
         // Snapshot: `raise` can drop a pin (window destroyed, app quit) and mutating the dictionary
         // while iterating its `keys` view is not safe.
+        // One window-list snapshot per tick instead of one per pin: `isOnscreen` used to call
+        // `getAllCGWindows()` per pin, which is an IPC round trip to WindowServer for every pin on
+        // every 150 ms tick.
+        // Membership in this set is also our Space/minimised test: there is no public Space API, so
+        // the documented-by-observation behaviour that `.optionOnScreenOnly` excludes minimised and
+        // off-Space windows is what AltTab, pin-window-on-top and this fork all rely on.
+        let onscreenIDs = Set(getAllCGWindows()?.compactMap { $0["kCGWindowNumber"] as? CGWindowID } ?? [])
+
         for windowID in Array(pins.keys) {
-            guard isOnscreen(windowID: windowID) else {
+            guard onscreenIDs.contains(windowID) else {
                 // Minimised, on another Space, or closed — nothing to raise. Pausing here also
                 // stops us from yanking the user to another Space by raising an off-screen window.
                 continue
             }
             raise(windowID: windowID)
         }
+    }
+
+    /// Other native pins must not count as occluders: two overlapping pins would otherwise raise
+    /// themselves above each other forever.
+    private func otherPinIDs(than windowID: CGWindowID) -> Set<CGWindowID> {
+        Set(pins.keys.filter { $0 != windowID })
     }
 
     private func raise(windowID: CGWindowID, force: Bool = false) {
@@ -225,16 +245,17 @@ final class NativePinManager: ObservableObject {
             pins[windowID] = state
             // 150 ms × 20 ≈ 3 s of trying: enough to cover "Accessibility permission granted a
             // moment ago", not enough to poll forever for windows that are never exposed.
-            if state.lookupFailures > 20 { unpin(windowID: windowID) }
+            if state.lookupFailures > Self.maxLookupFailures { unpin(windowID: windowID) }
             return
         }
         state.lookupFailures = 0
 
+        let ignored = otherPinIDs(than: windowID)
         let now = Date()
-        let backoff = min(Self.raiseInterval * pow(2, Double(min(state.failures, 4))), Self.maxBackoff)
+        let backoff = min(Self.raiseInterval * pow(2, Double(min(state.failures, Self.maxFailures))), Self.maxBackoff)
         // Occlusion (a window above us that actually overlaps us), not "nothing above me": otherwise
         // Topit's own overlays or unrelated windows elsewhere on screen would trigger endless raises.
-        guard force || isWindowOccluded(windowID: windowID),
+        guard force || isWindowOccluded(windowID: windowID, ignoring: ignored),
               force || now.timeIntervalSince(state.lastAttempt) >= backoff else {
             pins[windowID] = state
             return
@@ -247,14 +268,20 @@ final class NativePinManager: ObservableObject {
         // turhe123/pin-window-on-top (see docs/research/ax-native-pin-techniques.md).
         let frontmostBefore = NSWorkspace.shared.frontmostApplication
         let result = AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
+        // Only act when this raise actually changed the frontmost app (rather than on every raise),
+        // and throttle it: together with the occlusion-driven re-raise this is otherwise a closed
+        // loop of "raise → owner comes forward → hand back → covered again → raise" with visible
+        // focus flicker in the app the user is typing in.
         if result == .success,
            let before = frontmostBefore,
-           NSWorkspace.shared.frontmostApplication?.processIdentifier != before.processIdentifier {
+           NSWorkspace.shared.frontmostApplication?.processIdentifier != before.processIdentifier,
+           now.timeIntervalSince(state.lastFocusHandback) >= Self.focusHandbackInterval {
+            state.lastFocusHandback = now
             before.activate(options: [])
         }
         if result != .success {
             state.failures += 1
-        } else if isWindowOccluded(windowID: windowID) {
+        } else if isWindowOccluded(windowID: windowID, ignoring: ignored) {
             // The raise was accepted but the window is still covered — typically while a different
             // app owns the screen. Back off instead of hammering WindowServer every 150 ms.
             state.failures += 1
@@ -265,16 +292,6 @@ final class NativePinManager: ObservableObject {
     }
 
     // MARK: - Helpers
-
-    /// `true` while the window is actually visible: not minimised and not on another Space.
-    ///
-    /// There is no public Space API, so this uses the documented behaviour that
-    /// `CGWindowListCopyWindowInfo(.optionOnScreenOnly)` omits minimised and off-Space windows.
-    private func isOnscreen(windowID: CGWindowID) -> Bool {
-        guard let windows = getAllCGWindows() else { return false }
-        return windows.contains { ($0["kCGWindowNumber"] as? UInt32) == windowID }
-    }
-
     private func isValid(_ element: AXUIElement) -> Bool {
         var value: CFTypeRef?
         return AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &value) == .success

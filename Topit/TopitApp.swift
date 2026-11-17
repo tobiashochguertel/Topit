@@ -42,8 +42,10 @@ struct TopitApp: App {
                         })
                 )
         }.commands {
+            // Fork: the updater only exists when this fork ships its own feed (see Info.plist),
+            // so there is nothing to check for updates against upstream's appcast.
             CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: updaterController.updater)
+                if hasConfiguredFeed { CheckForUpdatesView(updater: updaterController.updater) }
             }
         }
     }
@@ -77,7 +79,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Window Selector".local, action: #selector(openFromMenuBar), keyEquivalent: "s")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Settings…".local, action: #selector(settings), keyEquivalent: ",")
-        menu.addItem(withTitle: "Check for Updates…".local, action: #selector(checkForUpdates), keyEquivalent: "")
+        if hasConfiguredFeed {
+            menu.addItem(withTitle: "Check for Updates…".local, action: #selector(checkForUpdates), keyEquivalent: "")
+        }
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Quit Topit".local, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusBarItem.menu = menu
@@ -114,7 +118,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if NSApp.windows.first(where: { $0.title == "Topit" })?.isVisible != true {
             axPerm = AXIsProcessTrusted()
             let mainPanel = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-            if axPerm && scPerm { mainPanel.level = .floating }
+            // Fork: in native mode `scPerm` is deliberately false (no ScreenCaptureKit probe), but the
+            // main panel should still float.
+            if axPerm && (scPerm || PinActions.currentMode == .native) { mainPanel.level = .floating }
             mainPanel.title = "Topit"
             mainPanel.titlebarSeparatorStyle = .none
             mainPanel.titlebarAppearsTransparent = true
@@ -172,6 +178,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 func pnpUnderMouseWindow() {
     guard let window = getWindowUnderMouse(),
           let windowID = window["kCGWindowNumber"] as? UInt32 else { return }
+    closeMainWindowIfPinningMirror(windowID: windowID)
     PinActions.toggle(windowID: windowID)
 }
 
@@ -180,7 +187,15 @@ func pnpFrontmostWindow() {
     // ScreenCaptureKit-free.
     guard let window = getFrontmostCGWindow(),
           let windowID = window["kCGWindowNumber"] as? UInt32 else { return }
+    closeMainWindowIfPinningMirror(windowID: windowID)
     PinActions.toggle(windowID: windowID)
+}
+
+/// Upstream closed Topit's own panel only from the two hotkey entry points, so that stays their
+/// behaviour rather than every pin entry point's (a window selector and the click mask close their
+/// own panel explicitly).
+func closeMainWindowIfPinningMirror(windowID: CGWindowID) {
+    if PinActions.currentMode == .mirror, !PinRegistry.shared.isPinned(windowID) { closeMainWindow() }
 }
 
 func closeMainWindow() {

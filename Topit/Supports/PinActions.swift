@@ -43,7 +43,6 @@ enum PinActions {
         }
         switch currentMode {
         case .mirror:
-            closeMainWindow()
             // Only mirror pins need a capture source — everything below is the point where a
             // native-only user would otherwise be asked for Screen Recording permission.
             guard let scWindow = getSCWindowWithID(windowID, noFilter: true),
@@ -57,23 +56,14 @@ enum PinActions {
     static func unpin(windowID: CGWindowID, mode: PinMode) {
         switch mode {
         case .mirror:
-            closeMirrorPanel(windowID: windowID)
+            MirrorPanel.close(windowID: windowID)
         case .native:
             NativePinManager.shared.unpin(windowID: windowID)
         }
     }
 
-    /// Overlay panels are addressed by title, exactly as upstream does: `Topit Layer<windowID>`
-    /// (and `Topit Layer<windowID>O` for the translucent variant).
-    static func closeMirrorPanel(windowID: CGWindowID) {
-        for w in NSApp.windows.filter({ $0.title == "Topit Layer\(windowID)"
-            || $0.title == "Topit Layer\(windowID)O" }) {
-            w.close()
-        }
-    }
-
     static func unpinAll() {
-        for layer in NSApp.windows.filter({ $0.title.hasPrefix("Topit Layer") }) { layer.close() }
+        MirrorPanel.closeAll()
         NativePinManager.shared.unpinAll()
         PinRegistry.shared.removeAll()
         AvoidManager.shared.activedFrame = .zero

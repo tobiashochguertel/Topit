@@ -26,8 +26,12 @@ screen-recording grants, which makes side-by-side comparison impossible.
   Upstream's appcast is signed with upstream's Sparkle key, so leaving it in place would let
   Sparkle replace this fork with stock Topit on the next update check.
 - `Topit/Supports/Sparkle.swift`: the `SPUStandardUpdaterController` now starts only when a
-  `SUFeedURL` is present in the bundle. Sparkle stays compiled in and the "Check for Updates…"
-  item shows up *disabled*; re-enabling it is an Info.plist change, not a code change.
+  `SUFeedURL` is present in the bundle. Sparkle stays compiled in; both "Check for Updates…" items
+  (app menu and status menu) are **hidden** in the fork, because there is nothing they could update
+  against. Re-enabling them is an Info.plist change, not a code change.
+- `Topit.xcodeproj/project.pbxproj`: also pins `PRODUCT_MODULE_NAME = Topit`. Without it, renaming
+  the product renames the Swift module to `Topit_Fork`, while `Scriptable.sdef` declares its five
+  commands as `Topit.<class>` — every AppleScript command would silently stop resolving.
 - `Topit/ViewModel/WindowHighlighter.swift`: window filtering compared `kCGWindowOwnerName`
   against the hard-coded string `"Topit"`. It now compares against `Bundle.main.appName`, which
   follows the renamed product.

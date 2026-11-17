@@ -83,6 +83,8 @@ final class HoverPinController: ObservableObject {
     private var hideWork: DispatchWorkItem?
     private var hostedWindowID: CGWindowID?
     private var lastFrame: CGRect = .zero
+    /// Previous cursor position, so an idle mouse costs nothing.
+    private var lastMouse: NSPoint?
 
     @AppStorage("showHoverPinButton") private var enabled: Bool = true
     @AppStorage("buttonPosition") private var buttonPosition: Int = 0
@@ -118,6 +120,10 @@ final class HoverPinController: ObservableObject {
         }
 
         let mouse = NSEvent.mouseLocation
+        defer { lastMouse = mouse }
+        // Nothing can have changed if the cursor has not moved and no button is on screen: this keeps
+        // the idle cost of the poll at zero instead of one full window-list copy per tick.
+        if mouse == lastMouse, panel?.isVisible != true { return }
 
         // Refresh before the self-hover shortcut below returns: the pinned state changes as a
         // result of clicking the button, and the cursor is on the button at exactly that moment.
@@ -140,9 +146,11 @@ final class HoverPinController: ObservableObject {
         cancelPendingHide()
 
         if windowID != targetWindowID {
-            // A new target may be full-screen (own Space) — no button there.
+            // A new target may be full-screen (own Space) — no button there. Hide immediately
+            // rather than after the delay: the button still carries the previous window's id in the
+            // meantime, and clicking it would pin the window the cursor came from.
             if isFullscreen(windowID: windowID) {
-                scheduleHide()
+                hideButton()
                 return
             }
             targetWindowID = windowID
@@ -201,17 +209,23 @@ final class HoverPinController: ObservableObject {
         }
 
         // Keep it reachable when the target window is partly off-screen (dual-monitor setups).
-        if let screen = getScreenWithMouse() ?? NSScreen.main {
-            let bounds = screen.frame.insetBy(dx: 4, dy: 4)
-            origin.x = min(max(origin.x, bounds.minX), bounds.maxX - Self.buttonSize)
-            origin.y = min(max(origin.y, bounds.minY), bounds.maxY - Self.buttonSize)
-        }
+        // Clamped against the union of all screens: the flip above uses the *main* screen height,
+        // so a per-screen clamp could disagree on arrangements where a secondary display is
+        // stacked above or below the main one.
+        let union = NSScreen.screens.reduce(NSScreen.screens.first?.frame ?? .zero) { $0.union($1.frame) }.insetBy(dx: 4, dy: 4)
+        origin.x = min(max(origin.x, union.minX), union.maxX - Self.buttonSize)
+        origin.y = min(max(origin.y, union.minY), union.maxY - Self.buttonSize)
 
+        // The panel sits at `.floating`, which is above every `layer == 0` window already. Upstream
+        // additionally re-orders relative to the foreign window number (WindowHighlighter does the
+        // same for its mask); that is best-effort across processes, so we only do it once when the
+        // panel appears instead of on every reposition.
+        let wasVisible = panel.isVisible
         panel.setFrameOrigin(origin)
-        if !panel.isVisible { panel.orderFront(self) }
-        // Sit above the hovered window rather than merely floating, which is how the existing
-        // selection mask does it too (WindowHighlighter.createMaskWindow).
-        panel.order(.above, relativeTo: Int(windowID))
+        if !wasVisible {
+            panel.orderFront(self)
+            panel.order(.above, relativeTo: Int(windowID))
+        }
     }
 
     private func refreshPinnedState() {
@@ -224,6 +238,7 @@ final class HoverPinController: ObservableObject {
         targetWindowID = nil
         targetIsPinned = false
         hostedWindowID = nil
+        lastFrame = .zero
         panel?.orderOut(nil)
     }
 

@@ -46,7 +46,7 @@ func getAppIcon(_ app: SCRunningApplication) -> NSImage? {
 }
 
 func createNewWindow(display: SCDisplay, window: SCWindow, opacity: Double? = nil) {
-    let title = "Topit Layer\(window.windowID)\(opacity == nil ? "" : "O")"
+    let title = MirrorPanel.title(windowID: window.windowID, opacity: opacity != nil)
     var panel: NSWindow!
     var contentView: NSView!
     
@@ -205,14 +205,17 @@ func isWindowOnTop(windowID: CGWindowID) -> Bool {
 /// non-overlapping windows legitimately sit above a pinned window. What matters is whether a window
 /// that *intersects* our bounds is stacked above us — that is the occlusion test used by
 /// `turhe123/pin-window-on-top` (`isAnyPinOccluded`), see docs/research/ax-native-pin-techniques.md.
-func isWindowOccluded(windowID: CGWindowID) -> Bool {
+/// - Parameter ignoring: window ids that are allowed to sit above this one. Needed because two
+///   pinned windows that overlap would otherwise each see the other as an occluder and re-raise in
+///   turn — a permanent raise/focus ping-pong.
+func isWindowOccluded(windowID: CGWindowID, ignoring ignoredIDs: Set<CGWindowID> = []) -> Bool {
     guard let frame = getCGWindowFrameWithID(windowID) else { return false }
     guard let above = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow], windowID) as? [[String: Any]] else { return false }
     let ownPID = ProcessInfo.processInfo.processIdentifier
     
     for window in above {
         // macOS 14+ can include the queried window itself at the head of the list.
-        if let wid = window["kCGWindowNumber"] as? CGWindowID, wid == windowID { continue }
+        if let wid = window["kCGWindowNumber"] as? CGWindowID, wid == windowID || ignoredIDs.contains(wid) { continue }
         guard let ownerPID = window["kCGWindowOwnerPID"] as? pid_t,
               ownerPID != ownPID,
               (window["kCGWindowLayer"] as? NSNumber) == 0,

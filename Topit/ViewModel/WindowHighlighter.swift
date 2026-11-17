@@ -32,7 +32,13 @@ struct HighlightMask: View {
                     // the window through CGWindowList also means picking a window no longer needs
                     // ScreenCaptureKit at all.
                     let id = UInt32(windowID)
-                    if getCGWindowWithID(id) != nil, !PinRegistry.shared.isPinned(id) {
+                    // Fork: pin through the mode-aware entry point and check the registry instead of
+                    // `SCManager.pinnedWdinwows`, which only ever knew about mirror pins. Resolving
+                    // the window through CGWindowList also means picking a window no longer needs
+                    // ScreenCaptureKit — except in mirror mode, where the window has to be
+                    // capturable, which is exactly what the red flash below reports.
+                    let capturable = PinActions.currentMode == .native || getSCWindowWithID(id, noFilter: true) != nil
+                    if capturable, getCGWindowWithID(id) != nil, !PinRegistry.shared.isPinned(id) {
                         mask.close()
                         PinActions.pin(windowID: id)
                         WindowHighlighter.shared.stopMouseMonitor()

@@ -12,7 +12,7 @@ import Sparkle
 /// Upstream's appcast is signed with upstream's Sparkle key, so the fork removes `SUFeedURL`
 /// and never starts the updater. Sparkle stays compiled in; enabling it only requires adding
 /// `SUFeedURL` + `SUPublicEDKey` back — no code change needed.
-private var hasConfiguredFeed: Bool {
+var hasConfiguredFeed: Bool {
     Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil
 }
 

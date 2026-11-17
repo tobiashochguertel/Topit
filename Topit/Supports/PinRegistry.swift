@@ -42,6 +42,35 @@ enum PinMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Title helpers for the mirror overlay panels.
+///
+/// The panel title is how Upstream Topit addresses its own overlays (there is no reference kept
+/// anywhere else), so the format is built and parsed in several places. Keeping it in one type
+/// stops `PinRegistry.prune()` from drifting away from the code that actually closes panels.
+enum MirrorPanel {
+    static let titlePrefix = "Topit Layer"
+
+    static func title(windowID: CGWindowID, opacity: Bool = false) -> String {
+        "\(titlePrefix)\(windowID)\(opacity ? "O" : "")"
+    }
+
+    static func exists(windowID: CGWindowID) -> Bool {
+        let titles = Set(NSApp.windows.map { $0.title })
+        return titles.contains(title(windowID: windowID)) || titles.contains(title(windowID: windowID, opacity: true))
+    }
+
+    static func close(windowID: CGWindowID) {
+        for w in NSApp.windows.filter({ $0.title == title(windowID: windowID)
+            || $0.title == title(windowID: windowID, opacity: true) }) {
+            w.close()
+        }
+    }
+
+    static func closeAll() {
+        for w in NSApp.windows.filter({ $0.title.hasPrefix(titlePrefix) }) { w.close() }
+    }
+}
+
 /// One pinned window. `id` is the `CGWindowID` (`kCGWindowNumber`), which is stable for the
 /// lifetime of a window and unique system-wide — unlike an `AXUIElement`, which may be
 /// recreated by the owning app, and unlike a window title, which is not unique.
@@ -52,8 +81,6 @@ struct PinEntry: Identifiable, Equatable {
     var appName: String
     var title: String
     var pinnedAt: Date
-
-    static func == (lhs: PinEntry, rhs: PinEntry) -> Bool { lhs.id == rhs.id }
 }
 
 final class PinRegistry: ObservableObject {
@@ -62,12 +89,6 @@ final class PinRegistry: ObservableObject {
     /// Published so SwiftUI (status menu, future pin list UI) can observe it.
     @Published private(set) var entries: [PinEntry] = []
 
-    /// Safety net for mirror pins: `OverlayView` unregisters its pin when the panel closes, so this
-    /// only covers the window between `createNewWindow` and the panel being visible in
-    /// `NSApp.windows`. Kept short — a long grace would make the hover button and hotkeys report a
-    /// window as pinned for seconds after the user closed its overlay.
-    private static let mirrorRegistrationGrace: TimeInterval = 0.3
-
     private init() {}
 
     // MARK: - Queries
@@ -75,8 +96,6 @@ final class PinRegistry: ObservableObject {
     func isPinned(_ windowID: CGWindowID) -> Bool { entries.contains { $0.id == windowID } }
 
     func mode(for windowID: CGWindowID) -> PinMode? { entries.first(where: { $0.id == windowID })?.mode }
-
-    var isEmpty: Bool { entries.isEmpty }
 
     func entries(of mode: PinMode) -> [PinEntry] { entries.filter { $0.mode == mode } }
 
@@ -120,18 +139,13 @@ final class PinRegistry: ObservableObject {
     /// Called before the registry is read by UI, so stale entries never show up in the menu.
     /// `NativePinManager` additionally prunes its own state on every timer tick.
     func prune() {
-        let now = Date()
-        let overlayTitles = Set(NSApp.windows.map { $0.title })
-
         entries.removeAll { entry in
             switch entry.mode {
             case .mirror:
-                // A mirror pin lives exactly as long as its overlay panel ("Topit Layer<id>").
-                if overlayTitles.contains("Topit Layer\(entry.id)")
-                    || overlayTitles.contains("Topit Layer\(entry.id)O") {
-                    return false
-                }
-                return now.timeIntervalSince(entry.pinnedAt) > PinRegistry.mirrorRegistrationGrace
+                // A mirror pin lives exactly as long as its overlay panel, and `OverlayView` already
+                // unregisters on close — this is only the safety net for anything else that removed a
+                // panel behind our back.
+                return !MirrorPanel.exists(windowID: entry.id)
             case .native:
                 // There is no public API to enumerate Spaces, so "window still exists" is the
                 // only safe signal: an off-screen (minimised / other Space) window is still
