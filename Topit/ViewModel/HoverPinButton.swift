@@ -105,12 +105,6 @@ final class HoverPinController: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    func stop() {
-        timer?.invalidate()
-        timer = nil
-        hideButton()
-    }
-
     // MARK: - Poll
 
     private func tick() {

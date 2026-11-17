@@ -97,8 +97,6 @@ final class PinRegistry: ObservableObject {
 
     func mode(for windowID: CGWindowID) -> PinMode? { entries.first(where: { $0.id == windowID })?.mode }
 
-    func entries(of mode: PinMode) -> [PinEntry] { entries.filter { $0.mode == mode } }
-
     // MARK: - Mutations
 
     func register(windowID: CGWindowID,
